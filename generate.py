@@ -6,7 +6,7 @@ import numpy as np
 import h5py
 
 
-def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42):
+def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42, method="deproject"):
     """
     Initializes a 3D, periodic gaussian random field with a given power spectrum
 
@@ -37,6 +37,9 @@ def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42):
     mask1 = K < kmin
     mask2 = K > kmax
 
+    if method == "curl":
+        kspec += 1
+
     VK = []
     for i in range(3):
         np.random.seed(seed + i)
@@ -49,11 +52,17 @@ def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42):
     VK = np.array(VK)
 
     VKP = np.zeros_like(VK, dtype=complex)
-    for i in range(3):
-        for j in range(3):
-            if i == j:
-                VKP[i] += VK[j]
-            VKP[i][mask] -= (KS[i] * KS[j] * VK[j])[mask] / (K[mask] ** 2)
+    if method == "deproject":
+        for i in range(3):
+            for j in range(3):
+                if i == j:
+                    VKP[i] += VK[j]
+                VKP[i][mask] -= (KS[i] * KS[j] * VK[j])[mask] / (K[mask] ** 2)
+    elif method == "curl":
+        for i in range(3):
+            VKP[i] = 1j * (KS[(i + 1) % 3] * VK[(i + 2) % 3] - KS[(i + 2) % 3] * VK[(i + 1) % 3])
+    else:
+        raise NotImplementedError("method for obtaining solenoidal field not implemented :(")
 
     (vx, vy, vz) = [np.fft.ifftn(vk).real for vk in VKP]
     sigma_res = np.sqrt(np.std(vx) ** 2 + np.std(vy) ** 2 + np.std(vz) ** 2)
