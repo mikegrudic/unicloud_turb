@@ -74,6 +74,13 @@ def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42, method="deproject"
 
 
 def cell_center_coordinates_1D(N: int = 128) -> np.ndarray:
+    """Returns the cell-centered coordinates on the unit interval [0,1]
+
+    Parameters
+    ----------
+    N: int, optional
+        Number of cells
+    """
     return (0.5 + np.arange(N)) / N
 
 
