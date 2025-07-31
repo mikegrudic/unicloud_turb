@@ -6,7 +6,7 @@ import numpy as np
 import h5py
 
 
-def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42, method="deproject"):
+def init_velocity_field_proj(sigma, kspec, kmin, kmax, N, seed=42):
     """
     Initializes a 3D, periodic gaussian random field with a given power spectrum
 
@@ -27,10 +27,9 @@ def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42, method="deproject"
     """
     kmin *= 2 * np.pi
     kmax *= 2 * np.pi
-    kx = np.fft.fftfreq(N, d=1.0 / N) * 2 * np.pi
-    ky = np.fft.fftfreq(N, d=1.0 / N) * 2 * np.pi
-    kz = np.fft.fftfreq(N, d=1.0 / N) * 2 * np.pi
-    KS = np.meshgrid(kx, ky, kz, indexing="ij")
+    k = np.fft.fftfreq(N, d=1.0 / N) * 2 * np.pi
+    KS = np.meshgrid(k, k, k, indexing="ij")
+    KS = np.array(KS)
     (KX, KY, KZ) = KS
     K = np.sqrt(KX**2 + KY**2 + KZ**2)
     mask = K > 0
