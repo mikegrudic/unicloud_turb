@@ -73,7 +73,11 @@ def init_velocity_field(sigma, kspec, kmin, kmax, N, seed=42, method="deproject"
     return (vx, vy, vz)
 
 
-def cell_center_coordinates(N: int = 128) -> tuple:
+def cell_center_coordinates_1D(N: int = 128) -> np.ndarray:
+    return (0.5 + np.arange(N)) / N
+
+
+def cell_center_coordinates_3D(N: int = 128) -> tuple:
     """
     Returns a tuple of 3 arrays containing the Cartesian coordinate functions at the cell centers in the unit cube.
 
@@ -88,8 +92,8 @@ def cell_center_coordinates(N: int = 128) -> tuple:
     increasing index corresponds to increasing coordinate value, and indices are ordered
     [x,y,z]
     """
-    coords = (0.5 + np.arange(N)) / N
-    return np.meshgrid(coords, coords, coords, indexing="ij")
+    x = cell_center_coordinates_1D(N)
+    return np.meshgrid(x, x, x, indexing="ij")
 
 
 def generate_velocity_cube(
@@ -122,7 +126,7 @@ def generate_velocity_cube(
     lorentz_bday = 18071853
 
     (vx, vy, vz) = init_velocity_field(sigma, kspec, kmin, kmax, N, seed=seed + lorentz_bday)
-    x, y, z = cell_center_coordinates(N)
+    x, y, z = cell_center_coordinates_3D(N)
 
     # Use H5py to create a HDF5 file that stores the velocity field information
     f = h5py.File(f"velocity_field_seed{seed}.h5", "w")
