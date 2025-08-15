@@ -27,7 +27,6 @@ import h5py
 from astropy import units as u, constants as c
 import numpy as np
 import os
-from scipy.spatial.distance import cdist
 from meshoid import Meshoid
 
 
@@ -178,8 +177,12 @@ def interpolate_velocity_to_cloud(
     # plt.show()
     return v_cloud
 
-def crutcher_Bfield(density):
-    
+
+def crutcher_Bfield(density, X_H=0.76):
+    B0, n0, alpha = 1e-5 * u.gauss, 300 * u.cm**-3, 0.65
+    n = (density * X_H / c.m_p).to(u.cm**-3)
+    return max(B0, B0 * (n / n0) ** alpha)
+
 
 def grav_energy_sphere(mass, radius, p):
     """Gravitational binding energy of a sphere of given mass, radius, and density profile index p
@@ -231,7 +234,7 @@ def make_IC(args):
     num_cells = num_cloud_cells + num_ambient_cells
 
     x_cloud = cloud_coordinates(num_cloud_cells, box_size, cloud_radius)
-    x_ambient = ambient_coordinates(num_cloud_cells, box_size, cloud_radius)
+    x_ambient = ambient_coordinates(num_ambient_cells, box_size, cloud_radius)
     v_cloud = interpolate_velocity_to_cloud(x_cloud, box_size, cloud_radius)
     masses = np.repeat(dm, num_cells)
 
@@ -242,7 +245,36 @@ def make_IC(args):
     B = frac_B * crutcher_Bfield(cloud_density)
     B = np.c_[np.zeros(num_cells), np.zeros(num_cells), np.ones(num_cells)] * B
 
-    return
+    T_cold = 100.0 * u.K
+    T_warm = 1e4 * u.K
+    mu_neutral = 1.28
+    u_cold = (1.5 * c.k_B * T_cold / (mu_neutral * c.m_p)).to(unit_speed**2)
+    u_warm = (1.5 * c.k_B * T_warm / (mu_neutral * c.m_p)).to(unit_speed**2)
+
+    spec_energy = u_cold * np.ones(num_cells)
+    spec_energy[-num_ambient_cells:] = u_warm
+
+    rho = cloud_density * np.ones(num_cells)
+    rho[-num_ambient_cells:] = ambient_density
+
+    hsml = (dm / rho) ** (1.0 / 3) * 2
+
+    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_dm{dm.value}_alpha{alpha}.hdf5"
+    with h5py.File(IC_path, "w") as F:
+        F.create_group("PartType0")
+        F.create_group("Header")
+        F["Header"].attrs["NumPart_Total"] = [num_cells] + 5 * [0]
+        F["Header"].attrs["NumPart_ThisFile"] = [num_cells] + 5 * [0]
+        F["Header"].attrs["BoxSize"] = box_size
+        F["Header"].attrs["Time"] = 0.0
+        F["PartType0"].create_dataset("Masses", data=masses)
+        F["PartType0"].create_dataset("SmoothingLength", data=hsml)
+        F["PartType0"].create_dataset("Density", data=rho)
+        F["PartType0"].create_dataset("Coordinates", data=x)
+        F["PartType0"].create_dataset("InternalEnergy", data=spec_energy)
+        F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
+        F["PartType0"].create_dataset("MagneticField", data=B)
+        F["PartType0"].create_dataset("Velocities", data=np.zeros_like(x))
 
 
 def make_paramsfile():
@@ -256,8 +288,8 @@ def make_paramsfile():
 # with h5py.File(path, "w") as F:
 #     F.create_group("PartType0")
 #     F.create_group("Header")
-#     F["Header"].attrs["NumPart_Total"] = [num_particles] + 5 * [0]
-#     F["Header"].attrs["NumPart_ThisFile"] = [num_particles] + 5 * [0]
+#     F["Header"].attrs["NumPart_Total"] = [num_cells] + 5 * [0]
+#     F["Header"].attrs["NumPart_ThisFile"] = [num_cells] + 5 * [0]
 #     F["Header"].attrs["box_size"] = L
 
 #     F["PartType0"].create_dataset("Masses", data=masses)
@@ -265,11 +297,11 @@ def make_paramsfile():
 #     F["PartType0"].create_dataset("Density", data=density)
 #     F["PartType0"].create_dataset("Coordinates", data=coordinates)
 #     F["PartType0"].create_dataset("InternalEnergy", data=spec_energy)
-#     F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_particles))
+#     F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
 
 #     F["PartType0"].create_dataset(
 #         "MagneticField",
-#         data=np.repeat([0, 0, B_gauss], num_particles),
+#         data=np.repeat([0, 0, B_gauss], num_cells),
 #     )
 #     F["PartType0"].create_dataset("Velocities", data=np.zeros_like(coordinates))
 
