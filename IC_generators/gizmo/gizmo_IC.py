@@ -197,6 +197,13 @@ def normalize_velocity(v, masses, cloud_mass, cloud_radius, alpha, p):
     v[:] = v * np.sqrt(kinetic_energy_target / np.sum(0.5 * masses[:, None] * v * v))
 
 
+def divv_errnorm(x, v, box_size):
+    M = Meshoid(x, boxsize=box_size.value)
+    div = M.Div(v).std()
+    curl = np.sum(M.Curl(v) ** 2, axis=1).mean() ** 0.5
+    return div / curl
+
+
 def make_IC(args):
     """Master routine that parses options and generates the IC and parameter file."""
     for k in args.keys():
@@ -236,6 +243,7 @@ def make_IC(args):
     x_cloud = cloud_coordinates(num_cloud_cells, box_size, cloud_radius)
     x_ambient = ambient_coordinates(num_ambient_cells, box_size, cloud_radius)
     v_cloud = interpolate_velocity_to_cloud(x_cloud, box_size, cloud_radius)
+    #    print(divv_errnorm(x_cloud, v_cloud, box_size))
     masses = np.repeat(dm, num_cells)
 
     x = np.concatenate([x_cloud, x_ambient])
@@ -274,7 +282,7 @@ def make_IC(args):
         F["PartType0"].create_dataset("InternalEnergy", data=spec_energy)
         F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
         F["PartType0"].create_dataset("MagneticField", data=B)
-        F["PartType0"].create_dataset("Velocities", data=np.zeros_like(x))
+        F["PartType0"].create_dataset("Velocities", data=v)
 
 
 def make_paramsfile():
