@@ -16,8 +16,9 @@ Options:
     --N=<num>         Number of equal-mass cells/particles in the cloud - overrides dm
     --alpha=<val>     Virial parameters (2x ratio of turbulent to gravitational energy) [default: 2]
     --B_scale=<f>     Magnetic field strength relative to Crutcher 2010 fit for the cloud density [default: 0.333]
-    --box_scale=<v>   Scaling factor of box side-length in units of the cloud radius [default: 4.0]
+    --box_scale=<v>   Scaling factor of box side-length in units of the cloud radius [default: 10.0]
     --ISRF=<f>        Scaling factor for the ISRF (affects params file options for GIZMO) [default: 1.0]
+    --Z=<f>           Scaling factor for the metallicity (affects params file options for GIZMO) [default: 1.0]
     --amb_dens=<f>    Scaling factor for ambient density relative to cloud density [default: 1e-3]
     --dens_power=<p>  Power such that density goes as r^p [default: 0.0]
 """
@@ -28,6 +29,7 @@ from astropy import units as u, constants as c
 import numpy as np
 import os
 from meshoid import Meshoid
+from scipy.ndimage import gaussian_filter
 
 
 def get_glass_coords(N_gas: int, verbose=False) -> np.ndarray:
@@ -141,40 +143,29 @@ def load_seed_field(path):
         for dir in "xyz":
             coords[dir] = np.array(F[dir])
             velocities[dir] = np.array(F["v" + dir])
+
     return coords, velocities
 
 
 def interpolate_velocity_to_cloud(
-    x_cloud: np.ndarray, box_size: float, cloud_radius: float, order: int = 1
+    x_cloud: np.ndarray, box_size: float, cloud_radius: float, order: int = 1, smooth_to_resolution=True
 ) -> np.ndarray:
-    coords, vel = load_seed_field("../../velocity_field_seed1.h5")
+    coords, vel = load_seed_field("../../velocity_field_seed0.h5")
     for dir in "xyz":
         coords[dir] = coords[dir] * 2 * cloud_radius
         coords[dir] += 0.5 * box_size - cloud_radius
 
+    # if this is a low-res simulation, should smooth to that resolution
+    if smooth_to_resolution:
+        res_effective = 2 * (3 * x_cloud.shape[0] / (4 * np.pi)) ** (1.0 / 3)
+        if res_effective < vel["x"].shape[0]:
+            sigma = vel["x"].shape[0] / res_effective
+            for dir in "xyz":
+                vel[dir] = gaussian_filter(vel[dir], sigma, mode="wrap")
+
     coords_flat = np.array([coords[dir].flatten() for dir in "xyz"]).T
     vel_flat = np.array([vel[dir].flatten() for dir in "xyz"]).T
     v_cloud = Meshoid(coords_flat, boxsize=box_size.value).Reconstruct(vel_flat, x_cloud.value, order=order)
-
-    # from matplotlib import pyplot as plt
-
-    # fig, ax = plt.subplots(2, 3)
-    # for i, dir in enumerate("xyz"):
-    #     imshow_args = {"vmin": -2, "vmax": 2}
-    #     slice_args = {
-    #         "res": 1024,
-    #         "size": 2 * cloud_radius.value,
-    #         "center": 0.5 * box_size.value * np.ones(3),
-    #         "order": 1,
-    #     }
-    #     ax[0, i].imshow(
-    #         Meshoid(coords_flat, boxsize=box_size.value, verbose=True).Slice(vel_flat[:, i], **slice_args),
-    #         **imshow_args
-    #     )
-    #     ax[1, i].imshow(
-    #         Meshoid(x_cloud.value, boxsize=box_size.value).Slice(v_cloud[:, i], **slice_args), **imshow_args
-    #     )
-    # plt.show()
     return v_cloud
 
 
@@ -204,7 +195,7 @@ def divv_errnorm(x, v, box_size):
     return div / curl
 
 
-def make_IC(args):
+def make_IC_and_paramsfile(args):
     """Master routine that parses options and generates the IC and parameter file."""
     for k in args.keys():
         # print(k, args[k])
@@ -243,7 +234,7 @@ def make_IC(args):
     x_cloud = cloud_coordinates(num_cloud_cells, box_size, cloud_radius)
     x_ambient = ambient_coordinates(num_ambient_cells, box_size, cloud_radius)
     v_cloud = interpolate_velocity_to_cloud(x_cloud, box_size, cloud_radius)
-    #    print(divv_errnorm(x_cloud, v_cloud, box_size))
+    # print(divv_errnorm(x_cloud, v_cloud, box_size))
     masses = np.repeat(dm, num_cells)
 
     x = np.concatenate([x_cloud, x_ambient])
@@ -267,7 +258,7 @@ def make_IC(args):
 
     hsml = (dm / rho) ** (1.0 / 3) * 2
 
-    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_dm{dm.value}_alpha{alpha}.hdf5"
+    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_N{num_cloud_cells}_alpha{alpha}.hdf5"
     with h5py.File(IC_path, "w") as F:
         F.create_group("PartType0")
         F.create_group("Header")
@@ -275,45 +266,73 @@ def make_IC(args):
         F["Header"].attrs["NumPart_ThisFile"] = [num_cells] + 5 * [0]
         F["Header"].attrs["BoxSize"] = box_size
         F["Header"].attrs["Time"] = 0.0
-        F["PartType0"].create_dataset("Masses", data=masses)
-        F["PartType0"].create_dataset("SmoothingLength", data=hsml)
-        F["PartType0"].create_dataset("Density", data=rho)
-        F["PartType0"].create_dataset("Coordinates", data=x)
-        F["PartType0"].create_dataset("InternalEnergy", data=spec_energy)
-        F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
-        F["PartType0"].create_dataset("MagneticField", data=B)
-        F["PartType0"].create_dataset("Velocities", data=v)
+        p0 = F["PartType0"]
+        p0.create_dataset("Masses", data=masses)
+        p0.create_dataset("SmoothingLength", data=hsml)
+        p0.create_dataset("Density", data=rho)
+        p0.create_dataset("Coordinates", data=x)
+        p0.create_dataset("InternalEnergy", data=spec_energy)
+        p0.create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
+        p0.create_dataset("MagneticField", data=B)
+        p0.create_dataset("Velocities", data=v)
+
+    make_paramsfile(IC_path, args, box_size, cloud_mass, cloud_radius, unit_time, dm)
 
 
-def make_paramsfile():
-    return
+def freefall_time(cloud_mass: u.Quantity, cloud_radius: u.Quantity):
+    return np.pi / 2 * np.sqrt(cloud_radius**3 / (2 * c.G * cloud_mass))
 
 
-#
+def make_paramsfile(
+    path: str,
+    args: dict,
+    box_size: u.Quantity,
+    cloud_mass: u.Quantity,
+    cloud_radius: u.Quantity,
+    unit_time: u.Quantity,
+    dm: u.Quantity,
+):
+    # convert both to s due to astropy bug not reducing dimensionless ratios?
+    tff_code = (freefall_time(cloud_mass, cloud_radius) / unit_time).to(u.dimensionless_unscaled)
+    prefix = path.split(".hdf5")[0].split("/")[1]
 
+    SOFTENING_AU = 20.0
+    SOFTENING_PLUMMER_TO_KERNEL = 2.8
+    paramsfile_defaults = {
+        "InitCondFile": prefix,
+        "OutputDir": "output",
+        "BoxSize": box_size.value,
+        "TimeMax": 10 * tff_code,
+        "TimeBetSnapshot": tff_code / 150,
+        "MaxSizeTimestep": tff_code / 300,
+        "UnitLength_in_cm": 3.09e18,
+        "UnitMass_in_g": 1.99e33,
+        "UnitVelocity_in_cm_per_s": 1.00e5,
+        "UnitMagneticField_in_gauss": 1.0,
+        "MaxMemSize": 5000,
+        "PartAllocFactor": 5.0,
+        "BufferSize": 500,
+        "TimeLimitCPU": 604800,
+        "CpuTimeBetRestartFile": 7200,
+        "DesNumNgb": 32,
+        "Softening_Type0": 1e-10,
+        "Softening_Type1": 1e-10,
+        "Softening_Type2": 1e-10,
+        "Softening_Type3": 1e-10,
+        "Softening_Type4": 1e-10,
+        "Softening_Type5": SOFTENING_AU * u.au.to(u.pc) / SOFTENING_PLUMMER_TO_KERNEL,
+        "InterstellarRadiationFieldStrength": float(args["--ISRF"]),
+        "InitMetallicity": float(args["--Z"]),
+        "SeedBlackHoleMass": dm.value / 10,
+        "BAL_wind_particle_mass": dm.value / 10,
+        "BAL_wind_particle_mass_MS": dm.value / 100,
+    }
 
-# IC_path = "./M{}
-# with h5py.File(path, "w") as F:
-#     F.create_group("PartType0")
-#     F.create_group("Header")
-#     F["Header"].attrs["NumPart_Total"] = [num_cells] + 5 * [0]
-#     F["Header"].attrs["NumPart_ThisFile"] = [num_cells] + 5 * [0]
-#     F["Header"].attrs["box_size"] = L
-
-#     F["PartType0"].create_dataset("Masses", data=masses)
-#     F["PartType0"].create_dataset("SmoothingLength", data=hsml)
-#     F["PartType0"].create_dataset("Density", data=density)
-#     F["PartType0"].create_dataset("Coordinates", data=coordinates)
-#     F["PartType0"].create_dataset("InternalEnergy", data=spec_energy)
-#     F["PartType0"].create_dataset("ParticleIDs", data=1 + np.arange(num_cells))
-
-#     F["PartType0"].create_dataset(
-#         "MagneticField",
-#         data=np.repeat([0, 0, B_gauss], num_cells),
-#     )
-#     F["PartType0"].create_dataset("Velocities", data=np.zeros_like(coordinates))
+    with open(f"params_{prefix}.txt", "w") as F:
+        for k, i in paramsfile_defaults.items():
+            F.write(f"{k}    {i}\n")
 
 
 if __name__ == "__main__":
     args = docopt(__doc__)
-    make_IC(args)
+    make_IC_and_paramsfile(args)
