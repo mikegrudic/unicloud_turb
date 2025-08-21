@@ -227,8 +227,9 @@ def make_IC_and_paramsfile(args):
         num_cloud_cells = int(args["--N"])
     else:
         dm = args["--dm"] * unit_mass
-        num_cloud_cells = int(round(cloud_mass / dm))
-    num_ambient_cells = int(round(ambient_mass / dm))
+        num_cloud_cells = int(round(float(cloud_mass / dm)))
+
+    num_ambient_cells = int(round(float(ambient_mass / dm)))
     num_cells = num_cloud_cells + num_ambient_cells
 
     x_cloud = cloud_coordinates(num_cloud_cells, box_size, cloud_radius)
