@@ -101,6 +101,7 @@ def cloud_coordinates(
     printv("Doing density profile...")
     rnew = (r / r.max()) ** (3.0 / (3 + density_exponent)) * cloud_radius
     x = x * (rnew / r)[:, None]
+    x[rnew == 0.0] = np.zeros((3,))
     r = radius(x)
     return np.take(x, r.argsort(), axis=0) + 0.5 * box_size
 
@@ -175,7 +176,7 @@ def crutcher_Bfield(density, X_H=0.76):
     return max(B0, B0 * (n / n0) ** alpha)
 
 
-def grav_energy_sphere(mass, radius, p):
+def grav_energy_sphere(mass: u.Quantity, radius: u.Quantity, p: int = 0):
     """Gravitational binding energy of a sphere of given mass, radius, and density profile index p
 
     e.g. -3/5 GM^2/R  for p=0 (uniform sphere)
@@ -195,10 +196,17 @@ def divv_errnorm(x, v, box_size):
     return div / curl
 
 
+def magnetic_energy(B: u.Quantity, cloud_radius: u.Quantity):
+    return B**2 / (2 * c.mu0) * (4 * np.pi / 3 * cloud_radius**3)
+
+
+def turbulent_energy(masses: u.Quantity, v: u.Quantity):
+    return 0.5 * np.sum(masses[:, None] * v**2)
+
+
 def make_IC_and_paramsfile(args):
     """Master routine that parses options and generates the IC and parameter file."""
     for k in args.keys():
-        # print(k, args[k])
         if k == "--help":
             continue
         if k is not None and args[k] is not None:
@@ -235,7 +243,6 @@ def make_IC_and_paramsfile(args):
     x_cloud = cloud_coordinates(num_cloud_cells, box_size, cloud_radius)
     x_ambient = ambient_coordinates(num_ambient_cells, box_size, cloud_radius)
     v_cloud = interpolate_velocity_to_cloud(x_cloud, box_size, cloud_radius)
-    # print(divv_errnorm(x_cloud, v_cloud, box_size))
     masses = np.repeat(dm, num_cells)
 
     x = np.concatenate([x_cloud, x_ambient])
@@ -243,6 +250,7 @@ def make_IC_and_paramsfile(args):
 
     normalize_velocity(v, masses, cloud_mass, cloud_radius, alpha, dens_power)
     B = frac_B * crutcher_Bfield(cloud_density)
+    #    print(magnetic_energy(B, cloud_radius).to(u.erg) / grav_energy_sphere(cloud_mass, cloud_radius).to(u.erg))
     B = np.c_[np.zeros(num_cells), np.zeros(num_cells), np.ones(num_cells)] * B
 
     T_cold = 100.0 * u.K
@@ -259,7 +267,7 @@ def make_IC_and_paramsfile(args):
 
     hsml = (dm / rho) ** (1.0 / 3) * 2
 
-    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_N{num_cloud_cells}_alpha{alpha}.hdf5"
+    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_N{num_cloud_cells}_alpha{alpha}_B{frac_B}_Z{args["--Z"]}_I{args["--ISRF"]}.hdf5"
     with h5py.File(IC_path, "w") as F:
         F.create_group("PartType0")
         F.create_group("Header")
