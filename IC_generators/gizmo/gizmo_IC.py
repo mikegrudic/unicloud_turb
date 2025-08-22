@@ -19,6 +19,7 @@ Options:
     --box_scale=<v>   Scaling factor of box side-length in units of the cloud radius [default: 10.0]
     --ISRF=<f>        Scaling factor for the ISRF (affects params file options for GIZMO) [default: 1.0]
     --Z=<f>           Scaling factor for the metallicity (affects params file options for GIZMO) [default: 1.0]
+    --z=<f>           Redshift assumed for the ambient radiation background field [default: 0.0]
     --amb_dens=<f>    Scaling factor for ambient density relative to cloud density [default: 1e-3]
     --dens_power=<p>  Power such that density goes as r^p [default: 0.0]
 """
@@ -266,7 +267,7 @@ def make_IC_and_paramsfile(args):
 
     hsml = (dm / rho) ** (1.0 / 3) * 2
 
-    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_N{num_cloud_cells}_alpha{alpha}_B{frac_B}_Z{args["--Z"]}_I{args["--ISRF"]}.hdf5"
+    IC_path = f"./M{cloud_mass.value}_R{cloud_radius.value}_N{num_cloud_cells}_alpha{alpha}_B{frac_B}_Z{args["--Z"]}_z{args["--z"]}_I{args["--ISRF"]}.hdf5"
     with h5py.File(IC_path, "w") as F:
         F.create_group("PartType0")
         F.create_group("Header")
@@ -334,6 +335,8 @@ def make_paramsfile(
         "SeedBlackHoleMass": dm.value / 10,
         "BAL_wind_particle_mass": dm.value / 10,
         "BAL_wind_particle_mass_MS": dm.value / 100,
+        "Redshift_RT_Background": args["--z"],
+        "CritPhysDensity": 1e13,
     }
 
     with open(f"params_{prefix}.txt", "w") as F:
